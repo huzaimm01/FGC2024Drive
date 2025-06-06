@@ -1,0 +1,482 @@
+package org.firstinspires.ftc.teamcode;
+
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.hardware.CRServo;
+import com.qualcomm.robotcore.hardware.ColorSensor;
+import com.qualcomm.robotcore.hardware.DistanceSensor;
+import com.qualcomm.robotcore.hardware.IMU;
+import com.qualcomm.robotcore.util.ElapsedTime;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.AxesOrder;
+import org.firstinspires.ftc.robotcore.external.navigation.AxesReference;
+import org.firstinspires.ftc.robotcore.external.navigation.Orientation;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+
+@Autonomous(name="FGC2024: Feeding Future Auto", group="Linear Opmode")
+public class FeedingTheFutureAuton extends LinearOpMode {
+
+    private ElapsedTime runtime = new ElapsedTime();
+    
+    private DcMotor leftFrontDrive = null;
+    private DcMotor rightFrontDrive = null;
+    private DcMotor leftBackDrive = null;
+    private DcMotor rightBackDrive = null;
+    private DcMotor intakeMotor = null;
+    private DcMotor liftMotor = null;
+    private DcMotor warehouseArm = null;
+    private DcMotor balanceMotor = null;
+    
+    private Servo armServo = null;
+    private Servo storageGate = null;
+    private Servo clampServo = null;
+    private Servo warehouseGripper = null;
+    private CRServo intakeServo = null;
+    
+    private ColorSensor ballColorSensor = null;
+    private DistanceSensor intakeDistance = null;
+    private IMU imu = null;
+    
+    static final double FIELD_WIDTH_MM = 7000.0;
+    static final double FIELD_LENGTH_MM = 7000.0;
+    static final double TILE_SIZE_MM = 600.0;
+    
+    static final double ROBOT_WIDTH_MM = 450.0;
+    static final double ROBOT_LENGTH_MM = 450.0;
+    
+    static final double NEXUS_GOAL_HEIGHT_MM = 300.0;
+    static final double FOOD_WAREHOUSE_HEIGHT_MM = 600.0;
+    static final double PLATFORM_HEIGHT_MM = 150.0;
+    
+    static final double START_X_RED = 500.0;
+    static final double START_X_BLUE = 6500.0;
+    static final double START_Y_CENTER = 3500.0;
+    
+    static final double COUNTS_PER_MOTOR_REV = 537.7;
+    static final double DRIVE_GEAR_REDUCTION = 1.0;
+    static final double WHEEL_DIAMETER_MM = 96.0;
+    static final double COUNTS_PER_MM = (COUNTS_PER_MOTOR_REV * DRIVE_GEAR_REDUCTION) /
+                                       (WHEEL_DIAMETER_MM * Math.PI);
+    
+    private boolean isRedAlliance = true;
+    private int ballsCollected = 0;
+    private boolean hasWaterAndEnergy = false;
+    
+    @Override
+    public void runOpMode() {
+        
+        initializeHardware();
+        
+        detectAllianceColor();
+        
+        telemetry.addData("Alliance", isRedAlliance ? "RED" : "BLUE");
+        telemetry.addData("Status", "Ready to run autonomous");
+        telemetry.addData("Strategy", "Nexus Goals → Food Production → Balance");
+        telemetry.update();
+        
+        waitForStart();
+        runtime.reset();
+        
+        if (opModeIsActive()) {
+            executeAutonomousStrategy();
+        }
+    }
+    
+    private void initializeHardware() {
+        telemetry.addData("Status", "Initializing Hardware...");
+        telemetry.update();
+        
+        leftFrontDrive = hardwareMap.get(DcMotor.class, "left_front_drive");
+        rightFrontDrive = hardwareMap.get(DcMotor.class, "right_front_drive");
+        leftBackDrive = hardwareMap.get(DcMotor.class, "left_back_drive");
+        rightBackDrive = hardwareMap.get(DcMotor.class, "right_back_drive");
+        
+        intakeMotor = hardwareMap.get(DcMotor.class, "intake_motor");
+        liftMotor = hardwareMap.get(DcMotor.class, "lift_motor");
+        warehouseArm = hardwareMap.get(DcMotor.class, "warehouse_arm");
+        balanceMotor = hardwareMap.get(DcMotor.class, "balance_motor");
+        
+        armServo = hardwareMap.get(Servo.class, "arm_servo");
+        storageGate = hardwareMap.get(Servo.class, "storage_gate");
+        clampServo = hardwareMap.get(Servo.class, "clamp_servo");
+        warehouseGripper = hardwareMap.get(Servo.class, "warehouse_gripper");
+        intakeServo = hardwareMap.get(CRServo.class, "intake_servo");
+        
+        ballColorSensor = hardwareMap.get(ColorSensor.class, "ball_color");
+        intakeDistance = hardwareMap.get(DistanceSensor.class, "intake_distance");
+        imu = hardwareMap.get(IMU.class, "imu");
+        
+        leftFrontDrive.setDirection(DcMotor.Direction.REVERSE);
+        leftBackDrive.setDirection(DcMotor.Direction.REVERSE);
+        rightFrontDrive.setDirection(DcMotor.Direction.FORWARD);
+        rightBackDrive.setDirection(DcMotor.Direction.FORWARD);
+        
+        setDriveMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        setDriveMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        
+        liftMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        liftMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        liftMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        
+        warehouseArm.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        warehouseArm.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        warehouseArm.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        
+        armServo.setPosition(0.5);
+        storageGate.setPosition(0.0);
+        clampServo.setPosition(0.0);
+        warehouseGripper.setPosition(0.0);
+        
+        telemetry.addData("Hardware", "Initialized Successfully");
+        telemetry.update();
+    }
+    
+    private void detectAllianceColor() {
+        isRedAlliance = true;
+    }
+    
+    private void executeAutonomousStrategy() {
+        telemetry.addData("Autonomous", "Starting 30-second strategy...");
+        telemetry.update();
+        
+        if (opModeIsActive() && runtime.seconds() < 8.0) {
+            scorePreloadedBalls();
+        }
+        
+        if (opModeIsActive() && runtime.seconds() < 20.0) {
+            collectAndScoreBalls();
+        }
+        
+        if (opModeIsActive() && runtime.seconds() < 25.0) {
+            attemptFoodProduction();
+        }
+        
+        if (opModeIsActive() && runtime.seconds() < 30.0) {
+            navigateToBalance();
+        }
+        
+        stopAllMotors();
+        telemetry.addData("Autonomous", "Completed!");
+        telemetry.update();
+    }
+    
+    private void scorePreloadedBalls() {
+        telemetry.addData("Phase 1", "Scoring preloaded balls");
+        telemetry.update();
+        
+        if (isRedAlliance) {
+            driveToPosition(1500, 0, 0.6);
+            turnToHeading(45, 0.4);
+        } else {
+            driveToPosition(-1500, 0, 0.6);
+            turnToHeading(-45, 0.4);
+        }
+        
+        liftToPosition(800, 0.7);
+        
+        armServo.setPosition(0.75);
+        sleep(500);
+        
+        storageGate.setPosition(1.0);
+        sleep(1000);
+        storageGate.setPosition(0.0);
+        
+        driveToPosition(400, 0, 0.5);
+        sleep(300);
+        
+        if (ballsCollected > 1) {
+            storageGate.setPosition(1.0);
+            sleep(1000);
+            storageGate.setPosition(0.0);
+        }
+        
+        armServo.setPosition(0.5);
+        liftToPosition(0, 0.5);
+    }
+    
+    private void collectAndScoreBalls() {
+        telemetry.addData("Phase 2", "Collecting and scoring balls");
+        telemetry.update();
+        
+        if (isRedAlliance) {
+            driveToPosition(0, -1200, 0.6);
+        } else {
+            driveToPosition(0, 1200, 0.6);
+        }
+        
+        intakeMotor.setPower(1.0);
+        intakeServo.setPower(1.0);
+        
+        for (int sweep = 0; sweep < 3 && opModeIsActive(); sweep++) {
+            driveToPosition(600, 0, 0.4);
+            
+            if (intakeDistance.getDistance(DistanceUnit.CM) < 8.0) {
+                identifyAndStoreBall();
+                ballsCollected++;
+                
+                if (ballsCollected >= 2) {
+                    quickScoreAtNearestNexus();
+                }
+            }
+            
+            driveToPosition(-600, 0, 0.4);
+        }
+        
+        intakeMotor.setPower(0);
+        intakeServo.setPower(0);
+    }
+    
+    private void attemptFoodProduction() {
+        telemetry.addData("Phase 3", "Attempting food production");
+        telemetry.update();
+        
+        if (hasWaterAndEnergy) {
+            navigateToProductionNexus();
+            
+            liftToPosition(1200, 0.8);
+            armServo.setPosition(0.8);
+            sleep(500);
+            
+            storageGate.setPosition(1.0);
+            sleep(1500);
+            
+            if (detectProducedFood()) {
+                collectProducedFood();
+                
+                deliverFoodToWarehouse();
+            }
+            
+            storageGate.setPosition(0.0);
+            armServo.setPosition(0.5);
+            liftToPosition(0, 0.6);
+        }
+    }
+    
+    private void navigateToBalance() {
+        telemetry.addData("Phase 4", "Navigating to balance platform");
+        telemetry.update();
+        
+        driveToPosition(0, 0, 0.8);
+        
+        if (isRedAlliance) {
+            driveToPosition(800, 400, 0.5);
+        } else {
+            driveToPosition(-800, -400, 0.5);
+        }
+        
+        driveToPosition(300, 0, 0.3);
+        
+        balanceMotor.setPower(0.2);
+        sleep(500);
+        balanceMotor.setPower(0);
+        
+        if (isBalanced()) {
+            telemetry.addData("Balance", "ACHIEVED - Multiplier Active!");
+        } else {
+            adjustBalancePosition();
+        }
+        
+        telemetry.update();
+    }
+    
+    private void navigateToProductionNexus() {
+        driveToPosition(0, 200, 0.6);
+        turnToHeading(0, 0.4);
+    }
+    
+    private void quickScoreAtNearestNexus() {
+        liftToPosition(600, 0.8);
+        armServo.setPosition(0.7);
+        sleep(400);
+        storageGate.setPosition(1.0);
+        sleep(800);
+        storageGate.setPosition(0.0);
+        armServo.setPosition(0.5);
+        liftToPosition(0, 0.6);
+    }
+    
+    private void identifyAndStoreBall() {
+        int red = ballColorSensor.red();
+        int green = ballColorSensor.green();
+        int blue = ballColorSensor.blue();
+        
+        if (blue > red && blue > green && blue > 150) {
+            telemetry.addData("Ball", "WATER detected");
+            if (green > 150) hasWaterAndEnergy = true;
+        } else if (green > red && green > blue && green > 150) {
+            telemetry.addData("Ball", "ENERGY detected");
+            if (blue > 150) hasWaterAndEnergy = true;
+        } else if (red > green && red > blue && red > 150) {
+            telemetry.addData("Ball", "FOOD detected");
+        }
+        
+        clampServo.setPosition(1.0);
+        sleep(300);
+        telemetry.update();
+    }
+    
+    private boolean detectProducedFood() {
+        sleep(1000);
+        return intakeDistance.getDistance(DistanceUnit.CM) < 10.0;
+    }
+    
+    private void collectProducedFood() {
+        intakeMotor.setPower(0.8);
+        intakeServo.setPower(1.0);
+        sleep(1000);
+        intakeMotor.setPower(0);
+        intakeServo.setPower(0);
+    }
+    
+    private void deliverFoodToWarehouse() {
+        driveToPosition(0, 1000, 0.7);
+        
+        warehouseArm.setTargetPosition(1000);
+        warehouseArm.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        warehouseArm.setPower(0.8);
+        
+        while (opModeIsActive() && warehouseArm.isBusy()) {
+            sleep(50);
+        }
+        
+        warehouseGripper.setPosition(1.0);
+        sleep(1000);
+        warehouseGripper.setPosition(0.0);
+        
+        warehouseArm.setTargetPosition(0);
+        warehouseArm.setPower(0.6);
+    }
+    
+    private boolean isBalanced() {
+        Orientation angles = imu.getRobotOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
+        double pitch = Math.abs(angles.secondAngle);
+        double roll = Math.abs(angles.thirdAngle);
+        
+        return (pitch < 5.0 && roll < 5.0);
+    }
+    
+    private void adjustBalancePosition() {
+        Orientation angles = imu.getRobotOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
+        
+        if (angles.secondAngle > 2.0) {
+            driveToPosition(-50, 0, 0.2);
+        } else if (angles.secondAngle < -2.0) {
+            driveToPosition(50, 0, 0.2);
+        }
+        
+        if (angles.thirdAngle > 2.0) {
+            driveToPosition(0, -50, 0.2);
+        } else if (angles.thirdAngle < -2.0) {
+            driveToPosition(0, 50, 0.2);
+        }
+    }
+    
+    private void driveToPosition(double forwardMM, double strafeMM, double power) {
+        int forwardTarget = (int)(forwardMM * COUNTS_PER_MM);
+        int strafeTarget = (int)(strafeMM * COUNTS_PER_MM);
+        
+        int leftFrontTarget = leftFrontDrive.getCurrentPosition() + forwardTarget + strafeTarget;
+        int rightFrontTarget = rightFrontDrive.getCurrentPosition() + forwardTarget - strafeTarget;
+        int leftBackTarget = leftBackDrive.getCurrentPosition() + forwardTarget - strafeTarget;
+        int rightBackTarget = rightBackDrive.getCurrentPosition() + forwardTarget + strafeTarget;
+        
+        leftFrontDrive.setTargetPosition(leftFrontTarget);
+        rightFrontDrive.setTargetPosition(rightFrontTarget);
+        leftBackDrive.setTargetPosition(leftBackTarget);
+        rightBackDrive.setTargetPosition(rightBackTarget);
+        
+        setDriveMode(DcMotor.RunMode.RUN_TO_POSITION);
+        
+        leftFrontDrive.setPower(Math.abs(power));
+        rightFrontDrive.setPower(Math.abs(power));
+        leftBackDrive.setPower(Math.abs(power));
+        rightBackDrive.setPower(Math.abs(power));
+        
+        while (opModeIsActive() && 
+               (leftFrontDrive.isBusy() || rightFrontDrive.isBusy() || 
+                leftBackDrive.isBusy() || rightBackDrive.isBusy())) {
+            
+            telemetry.addData("Path", "Driving to %.0f, %.0f", forwardMM, strafeMM);
+            telemetry.addData("Position", "LF:%d RF:%d LB:%d RB:%d",
+                            leftFrontDrive.getCurrentPosition(),
+                            rightFrontDrive.getCurrentPosition(),
+                            leftBackDrive.getCurrentPosition(),
+                            rightBackDrive.getCurrentPosition());
+            telemetry.update();
+        }
+        
+        stopDriveMotors();
+        setDriveMode(DcMotor.RunMode.RUN_USING_ENCODER);
+    }
+    
+    private void turnToHeading(double targetHeading, double power) {
+        Orientation angles = imu.getRobotOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
+        double currentHeading = angles.firstAngle;
+        double error = targetHeading - currentHeading;
+        
+        while (error > 180) error -= 360;
+        while (error <= -180) error += 360;
+        
+        while (opModeIsActive() && Math.abs(error) > 2.0) {
+            double turnPower = error > 0 ? power : -power;
+            
+            leftFrontDrive.setPower(-turnPower);
+            rightFrontDrive.setPower(turnPower);
+            leftBackDrive.setPower(-turnPower);
+            rightBackDrive.setPower(turnPower);
+            
+            angles = imu.getRobotOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
+            currentHeading = angles.firstAngle;
+            error = targetHeading - currentHeading;
+            
+            while (error > 180) error -= 360;
+            while (error <= -180) error += 360;
+            
+            telemetry.addData("Turn", "Target:%.1f Current:%.1f Error:%.1f", 
+                            targetHeading, currentHeading, error);
+            telemetry.update();
+        }
+        
+        stopDriveMotors();
+    }
+    
+    private void liftToPosition(int targetPosition, double power) {
+        liftMotor.setTargetPosition(targetPosition);
+        liftMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        liftMotor.setPower(Math.abs(power));
+        
+        while (opModeIsActive() && liftMotor.isBusy()) {
+            telemetry.addData("Lift", "Moving to %d, Current: %d", 
+                            targetPosition, liftMotor.getCurrentPosition());
+            telemetry.update();
+        }
+        
+        liftMotor.setPower(0.1);
+    }
+    
+    private void setDriveMode(DcMotor.RunMode mode) {
+        leftFrontDrive.setMode(mode);
+        rightFrontDrive.setMode(mode);
+        leftBackDrive.setMode(mode);
+        rightBackDrive.setMode(mode);
+    }
+    
+    private void stopDriveMotors() {
+        leftFrontDrive.setPower(0);
+        rightFrontDrive.setPower(0);
+        leftBackDrive.setPower(0);
+        rightBackDrive.setPower(0);
+    }
+    
+    private void stopAllMotors() {
+        stopDriveMotors();
+        intakeMotor.setPower(0);
+        liftMotor.setPower(0);
+        warehouseArm.setPower(0);
+        balanceMotor.setPower(0);
+        intakeServo.setPower(0);
+    }
+}

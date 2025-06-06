@@ -1,0 +1,347 @@
+package org.firstinspires.ftc.teamcode;
+
+import com.qualcomm.robotcore.eventloop.opmode.OpMode;
+import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.hardware.CRServo;
+import com.qualcomm.robotcore.hardware.ColorSensor;
+import com.qualcomm.robotcore.hardware.DistanceSensor;
+import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.Range;
+
+@TeleOp(name="FGC2024: Feeding the Future", group="Iterative Opmode")
+public class FeedingTheFutureTeleOp extends OpMode {
+    
+    private ElapsedTime runtime = new ElapsedTime();
+    
+    
+    private DcMotor leftFrontDrive = null;    // gamepad1.left_stick_x/y, left_bumper (Logitech: L1)
+    private DcMotor rightFrontDrive = null;   // gamepad1.left_stick_x/y, left_bumper (Logitech: L1)
+    private DcMotor leftBackDrive = null;     // gamepad1.left_stick_x/y, left_bumper (Logitech: L1)
+    private DcMotor rightBackDrive = null;    // gamepad1.left_stick_x/y, left_bumper (Logitech: L1)
+    
+   
+    private DcMotor intakeMotor = null;       // gamepad2.right_trigger/left_trigger (Logitech: R2/L2)
+    private CRServo intakeServo = null;       // gamepad2.right_bumper/left_bumper (Logitech: R1/L1)
+    
+    
+    private DcMotor liftMotor = null;         // gamepad2.left_stick_y (Logitech: left analog Y)
+    private Servo armServo = null;            // gamepad2.dpad_up/dpad_down (Logitech: D-pad up/down)
+    
+    
+    private Servo storageGate = null;         // gamepad2.a/b (Logitech: X/Circle)
+    private Servo clampServo = null;          // gamepad2.x/y (Logitech: Square/Triangle)
+    
+    
+    private DcMotor warehouseArm = null;      // gamepad1.right_stick_y (Logitech: right analog Y)
+    private Servo warehouseGripper = null;    // gamepad1.a/b (Logitech: X/Circle)
+    
+    
+    private DcMotor balanceMotor = null;      // gamepad1.dpad_up/dpad_down (Logitech: D-pad up/down)
+    
+    
+    private ColorSensor ballColorSensor = null;
+    private DistanceSensor intakeDistance = null;
+    
+    
+    private double driveSpeed = 1.0;
+    private double liftPosition = 0.0;
+    private double armPosition = 0.5;
+    private boolean gateOpen = false;
+    private boolean clampClosed = false;
+    private boolean warehouseGripperClosed = false;
+    
+    
+    private boolean hasWater = false;
+    private boolean hasEnergy = false;
+    private boolean hasFood = false;
+    private int ballCount = 0;
+    
+    @Override
+    public void init() {
+        telemetry.addData("Status", "Initializing Hardware...");
+        
+        leftFrontDrive = hardwareMap.get(DcMotor.class, "left_front_drive");
+        rightFrontDrive = hardwareMap.get(DcMotor.class, "right_front_drive");
+        leftBackDrive = hardwareMap.get(DcMotor.class, "left_back_drive");
+        rightBackDrive = hardwareMap.get(DcMotor.class, "right_back_drive");
+        
+        intakeMotor = hardwareMap.get(DcMotor.class, "intake_motor");
+        intakeServo = hardwareMap.get(CRServo.class, "intake_servo");
+        
+        liftMotor = hardwareMap.get(DcMotor.class, "lift_motor");
+        armServo = hardwareMap.get(Servo.class, "arm_servo");
+        
+        storageGate = hardwareMap.get(Servo.class, "storage_gate");
+        clampServo = hardwareMap.get(Servo.class, "clamp_servo");
+        
+        warehouseArm = hardwareMap.get(DcMotor.class, "warehouse_arm");
+        warehouseGripper = hardwareMap.get(Servo.class, "warehouse_gripper");
+        
+        balanceMotor = hardwareMap.get(DcMotor.class, "balance_motor");
+        
+        ballColorSensor = hardwareMap.get(ColorSensor.class, "ball_color");
+        intakeDistance = hardwareMap.get(DistanceSensor.class, "intake_distance");
+        
+        leftFrontDrive.setDirection(DcMotor.Direction.REVERSE);
+        leftBackDrive.setDirection(DcMotor.Direction.REVERSE);
+        rightFrontDrive.setDirection(DcMotor.Direction.FORWARD);
+        rightBackDrive.setDirection(DcMotor.Direction.FORWARD);
+        
+        liftMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        liftMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        liftMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        
+        warehouseArm.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        warehouseArm.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        warehouseArm.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        
+        balanceMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        
+        armServo.setPosition(0.5);
+        storageGate.setPosition(0.0);
+        clampServo.setPosition(0.0);
+        warehouseGripper.setPosition(0.0);
+        
+        telemetry.addData("Status", "Hardware Initialized");
+        telemetry.addData("Game", "Feeding the Future - Ready!");
+    }
+    
+    @Override
+    public void init_loop() {
+        detectGamePieces();
+        telemetry.addData("Ball Count", ballCount);
+        telemetry.addData("Has Water", hasWater);
+        telemetry.addData("Has Energy", hasEnergy);
+        telemetry.addData("Has Food", hasFood);
+    }
+    
+    @Override
+    public void start() {
+        runtime.reset();
+    }
+    
+    @Override
+    public void loop() {
+        // Driver 1 controls [GAMEPAD1] =====
+        
+        
+        double drive = -gamepad1.left_stick_y;
+        double strafe = gamepad1.left_stick_x;
+        double turn = gamepad1.right_stick_x;
+        
+        if (gamepad1.left_bumper) {
+            driveSpeed = 0.3;
+        } else if (gamepad1.right_bumper) {
+            driveSpeed = 1.0;
+        } else {
+            driveSpeed = 0.7;
+        }
+        
+        double leftFrontPower = Range.clip((drive + strafe + turn) * driveSpeed, -1.0, 1.0);
+        double rightFrontPower = Range.clip((drive - strafe - turn) * driveSpeed, -1.0, 1.0);
+        double leftBackPower = Range.clip((drive - strafe + turn) * driveSpeed, -1.0, 1.0);
+        double rightBackPower = Range.clip((drive + strafe - turn) * driveSpeed, -1.0, 1.0);
+        
+        leftFrontDrive.setPower(leftFrontPower);
+        rightFrontDrive.setPower(rightFrontPower);
+        leftBackDrive.setPower(leftBackPower);
+        rightBackDrive.setPower(rightBackPower);
+        
+        
+        double warehouseArmPower = -gamepad1.right_stick_y * 0.8;
+        warehouseArm.setPower(warehouseArmPower);
+        
+        
+        if (gamepad1.a && !warehouseGripperClosed) {
+            warehouseGripper.setPosition(1.0);
+            warehouseGripperClosed = true;
+        } else if (gamepad1.b && warehouseGripperClosed) {
+            warehouseGripper.setPosition(0.0);
+            warehouseGripperClosed = false;
+        }
+        
+        
+        if (gamepad1.dpad_up) {
+            balanceMotor.setPower(0.6);
+        } else if (gamepad1.dpad_down) {
+            balanceMotor.setPower(-0.6);
+        } else {
+            balanceMotor.setPower(0.0);
+        }
+        
+        // KILL SWITCH
+        if (gamepad1.start && gamepad1.back) {
+            stopAllMotors();
+        }
+        
+        // Second Driver Controls [GAMEPAD 2]
+        double intakePower = 0.0;
+        if (gamepad2.right_trigger > 0.1) {
+            intakePower = gamepad2.right_trigger;
+            intakeServo.setPower(1.0);
+        } else if (gamepad2.left_trigger > 0.1) {
+            intakePower = -gamepad2.left_trigger;
+            intakeServo.setPower(-1.0);
+        } else {
+            intakeServo.setPower(0.0);
+        }
+        intakeMotor.setPower(intakePower);
+        
+        
+        if (gamepad2.right_bumper) {
+            intakeServo.setPower(1.0);
+        } else if (gamepad2.left_bumper) {
+            intakeServo.setPower(-1.0);
+        }
+        
+      
+        double liftPower = -gamepad2.left_stick_y * 0.9;
+        liftMotor.setPower(liftPower);
+        
+        
+        if (gamepad2.dpad_up) {
+            armPosition = Math.min(armPosition + 0.01, 1.0);
+        } else if (gamepad2.dpad_down) {
+            armPosition = Math.max(armPosition - 0.01, 0.0);
+        }
+        armServo.setPosition(armPosition);
+        
+        
+        if (gamepad2.a && !gateOpen) {
+            storageGate.setPosition(1.0);
+            gateOpen = true;
+        } else if (gamepad2.b && gateOpen) {
+            storageGate.setPosition(0.0);
+            gateOpen = false;
+        }
+        
+        
+        if (gamepad2.x && !clampClosed) {
+            clampServo.setPosition(1.0);
+            clampClosed = true;
+        } else if (gamepad2.y && clampClosed) {
+            clampServo.setPosition(0.0);
+            clampClosed = false;
+        }
+        
+        
+        if (gamepad2.start && hasWater && hasEnergy) {
+            executeProduceSequence();
+        }
+        
+        
+        if (gamepad2.back) {
+            executeConserveSequence();
+        }
+        
+        
+        detectGamePieces();
+        
+        
+        updateTelemetry();
+    }
+    
+    private void executeProduceSequence() {
+        
+        liftMotor.setTargetPosition(1200); 
+        liftMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        liftMotor.setPower(0.8);
+        
+        sleep(1000);
+        
+        armServo.setPosition(0.8);
+        sleep(500);
+        
+        storageGate.setPosition(1.0); 
+        sleep(1000);
+        storageGate.setPosition(0.0);
+        
+        armServo.setPosition(0.5); 
+        liftMotor.setTargetPosition(0);
+        liftMotor.setPower(0.6);
+        
+        hasWater = false;
+        hasEnergy = false;
+    }
+    
+    private void executeConserveSequence() {
+        
+        liftMotor.setTargetPosition(800);
+        liftMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        liftMotor.setPower(0.7);
+        
+        sleep(800);
+        
+        armServo.setPosition(0.7);
+        sleep(400);
+        
+        clampServo.setPosition(0.0); 
+        sleep(300);
+        
+        armServo.setPosition(0.5);
+        liftMotor.setTargetPosition(0);
+        liftMotor.setPower(0.5);
+    }
+    
+    private void detectGamePieces() {
+        double distance = intakeDistance.getDistance(org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit.CM);
+        
+        if (distance < 8.0) {
+            int red = ballColorSensor.red();
+            int green = ballColorSensor.green();
+            int blue = ballColorSensor.blue();
+            
+            if (blue > red && blue > green && blue > 150) {
+                hasWater = true;
+                ballCount++;
+            } else if (green > red && green > blue && green > 150) {
+                hasEnergy = true;
+                ballCount++;
+            } else if (red > green && red > blue && red > 150) {
+                hasFood = true;
+                ballCount++;
+            }
+        }
+        
+        if (ballCount > 3) ballCount = 3; 
+    }
+    
+    private void stopAllMotors() {
+        leftFrontDrive.setPower(0);
+        rightFrontDrive.setPower(0);
+        leftBackDrive.setPower(0);
+        rightBackDrive.setPower(0);
+        intakeMotor.setPower(0);
+        liftMotor.setPower(0);
+        warehouseArm.setPower(0);
+        balanceMotor.setPower(0);
+        intakeServo.setPower(0);
+    }
+    
+    private void updateTelemetry() {
+        telemetry.addData("Status", "Run Time: " + runtime.toString());
+        telemetry.addData("Drive Speed", "%.1f", driveSpeed);
+        telemetry.addData("Ball Count", ballCount);
+        telemetry.addData("Game Pieces", "W:%s E:%s F:%s", hasWater, hasEnergy, hasFood);
+        telemetry.addData("Lift Position", liftMotor.getCurrentPosition());
+        telemetry.addData("Arm Position", "%.2f", armPosition);
+        telemetry.addData("Storage Gate", gateOpen ? "OPEN" : "CLOSED");
+        telemetry.addData("Clamp", clampClosed ? "CLOSED" : "OPEN");
+        telemetry.addData("Warehouse Gripper", warehouseGripperClosed ? "CLOSED" : "OPEN");
+        telemetry.addData("Motors", "LF:%.1f RF:%.1f LB:%.1f RB:%.1f", 
+                         leftFrontDrive.getPower(), rightFrontDrive.getPower(),
+                         leftBackDrive.getPower(), rightBackDrive.getPower());
+        telemetry.update();
+    }
+    
+    private void sleep(long milliseconds) {
+        try {
+            Thread.sleep(milliseconds);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
